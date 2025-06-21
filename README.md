@@ -9,6 +9,7 @@ A tool that analyzes Python code to identify functions that would be impacted by
 - Supports analyzing individual files or entire directories
 - Handles object-oriented code with classes and methods
 - Can identify impacts based on function name or line number
+- Generates visual dependency graphs to help understand function relationships
 
 ## Installation
 
@@ -43,6 +44,15 @@ python-impact --path path/to/your/file.py --function ClassName.method_name
 
 # Analyze impacts of code at a specific line
 python-impact --path path/to/your/file.py --line 42
+
+# Generate a visualization of function impacts
+python-impact --path path/to/your/file.py --function function_name --visualize
+
+# Specify an output file for the visualization
+python-impact --path path/to/your/file.py --function function_name --visualize --output my_graph.dot
+
+# Generate a visualization of the entire dependency graph
+python-impact --path path/to/your/file.py --visualize
 ```
 
 ## Examples
@@ -87,7 +97,7 @@ The tool also works with classes and methods:
 class Calculator:
     def add(self, a, b):
         return a + b
-    
+
     def calculate(self, a, b):
         return self.add(a, b) * 2
 
@@ -112,6 +122,65 @@ Impacted Functions:
   main (example.py:8)
 ```
 
+## Visualizing Dependencies
+
+The tool can generate visual representations of function dependencies to help you understand the relationships between functions in your codebase.
+
+### Generating Visualizations
+
+To generate a visualization of the impact of a specific function:
+
+```bash
+python-impact --path path/to/your/file.py --function function_name --visualize
+```
+
+This will create a DOT file (e.g., `function_name_impact.dot`) that represents the dependency graph. The graph shows the target function and all functions that would be impacted by changes to it.
+
+You can specify a custom output file:
+
+```bash
+python-impact --path path/to/your/file.py --function function_name --visualize --output my_graph.dot
+```
+
+### Viewing Visualizations
+
+The generated DOT files can be viewed using various tools:
+
+1. **Graphviz**: Convert the DOT file to an image format
+   ```bash
+   dot -Tpng function_name_impact.dot -o function_name_impact.png
+   ```
+
+2. **Online DOT viewers**: Upload the DOT file to online viewers like [WebGraphviz](http://www.webgraphviz.com/)
+
+3. **IDE plugins**: Many IDEs have plugins for viewing DOT files
+
+### Interpreting the Graph
+
+In the visualization:
+- Each node represents a function or method
+- Edges (arrows) show dependencies between functions
+- By default, arrows point from a function to the functions it impacts
+- The target function is typically at the top of the graph
+
+### Example Visualization
+
+For the example code:
+
+```python
+def add(a, b):
+    return a + b
+
+def calculate(a, b):
+    result = add(a, b)
+    return result * 2
+
+def main():
+    print(calculate(5, 3))
+```
+
+A visualization of the impact of the `add` function would show arrows from `add` to `calculate` and from `calculate` to `main`, indicating that changes to `add` would impact both `calculate` and `main`.
+
 ## How It Works
 
 The tool uses the following process to analyze Python code:
@@ -120,6 +189,7 @@ The tool uses the following process to analyze Python code:
 2. Identify all function and method definitions
 3. Build a dependency graph by analyzing function calls
 4. When analyzing impacts, traverse the dependency graph in reverse to find functions that depend on the target function
+5. For visualizations, generate a DOT format representation of the relevant portion of the dependency graph
 
 ## Limitations
 
