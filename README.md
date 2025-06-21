@@ -191,6 +191,17 @@ The tool uses the following process to analyze Python code:
 4. When analyzing impacts, traverse the dependency graph in reverse to find functions that depend on the target function
 5. For visualizations, generate a DOT format representation of the relevant portion of the dependency graph
 
+## Continuous Integration
+
+This project uses GitHub Actions for continuous integration. All tests are automatically run on every pull request to ensure code quality and prevent regressions.
+
+The CI workflow:
+- Builds the project
+- Runs all tests
+- Reports any test failures
+
+You can see the workflow configuration in the `.github/workflows/rust-tests.yml` file.
+
 ## Limitations
 
 - The tool analyzes static code and may not capture all dynamic dependencies
