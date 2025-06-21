@@ -1,0 +1,13 @@
+[package]
+name = "python-impact"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tree-sitter = "0.20.10"
+tree-sitter-python = "0.20.4"
+clap = { version = "4.4", features = ["derive"] }
+anyhow = "1.0"
+colored = "2.0"
+petgraph = { version = "0.6", features = ["graphmap", "dot"] }
+dot = "0.1.4"
