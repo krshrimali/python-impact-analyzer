@@ -15,8 +15,8 @@ A tool that analyzes Python code to identify functions that would be impacted by
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/python-impact.git
-cd python-impact
+git clone https://github.com/krshrimali/python-impact-analyzer.git
+cd python-impact-analyzer
 
 # Build the project
 cargo build --release
