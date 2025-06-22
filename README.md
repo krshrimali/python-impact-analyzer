@@ -6,6 +6,8 @@ A tool that analyzes Python code to identify functions that would be impacted by
 
 - Analyzes Python code to build a dependency graph between functions and methods
 - Identifies which functions would be impacted by changes to a specific function
+- Tracks if conditions and identifies functions impacted by changes to them
+- Analyzes shared variables between if conditions across different functions
 - Supports analyzing individual files or entire directories
 - Handles object-oriented code with classes and methods
 - Can identify impacts based on function name or line number
@@ -181,15 +183,69 @@ def main():
 
 A visualization of the impact of the `add` function would show arrows from `add` to `calculate` and from `calculate` to `main`, indicating that changes to `add` would impact both `calculate` and `main`.
 
+### Example of If Condition Impact Analysis
+
+Consider this example with if conditions:
+
+```python
+def check_condition(value):
+    if value > 10:  # This condition uses the variable 'value'
+        return "Greater than 10"
+    elif value < 0:  # This condition also uses 'value'
+        return "Negative"
+    else:
+        return "Between 0 and 10"
+
+def process_value(value):
+    # This function uses the same variable 'value' in its condition
+    if value % 2 == 0:  # This condition would be impacted if 'value' changes meaning
+        return "Even"
+    else:
+        return "Odd"
+
+def calculate_result(input_value):
+    # This function calls check_condition and would be impacted by changes to it
+    result = check_condition(input_value)
+
+    # It also uses the same variable in its own condition
+    if input_value > 100:  # This condition shares a variable with check_condition
+        result += " (Large)"
+
+    return result
+```
+
+When analyzing the impact of changing the if condition in `check_condition`, the tool will identify:
+
+1. `calculate_result` is impacted because it calls `check_condition` (direct dependency)
+2. `process_value` is impacted because it uses the same variable `value` in its if condition (if condition dependency)
+
+This shows how the tool can identify functions that would be impacted by changes to if conditions, even if there's no direct function call dependency.
+
 ## How It Works
 
 The tool uses the following process to analyze Python code:
+
+### Function-Level Impact Analysis
 
 1. Parse the Python code using the tree-sitter parser
 2. Identify all function and method definitions
 3. Build a dependency graph by analyzing function calls
 4. When analyzing impacts, traverse the dependency graph in reverse to find functions that depend on the target function
 5. For visualizations, generate a DOT format representation of the relevant portion of the dependency graph
+
+### If Condition Impact Analysis
+
+The tool also tracks if conditions and the variables used in them:
+
+1. Identify all if statements within functions
+2. Extract the condition expression and the variables used in it
+3. Track which functions use which variables in their if conditions
+4. When a function's if condition changes:
+   - Identify all variables used in the condition
+   - Find all other functions that use the same variables in their if conditions
+   - These functions might be impacted by the change, even if there's no direct function call dependency
+
+This allows the tool to identify functions that would be impacted by changes to if conditions, not just by direct function calls. For example, if two functions use the same variable in their if conditions, changing the meaning or value of that variable in one function could impact the behavior of the other function.
 
 ## Continuous Integration
 
@@ -205,7 +261,9 @@ You can see the workflow configuration in the `.github/workflows/rust-tests.yml`
 ## Limitations
 
 - The tool analyzes static code and may not capture all dynamic dependencies
-- It doesn't track dependencies through variables or function pointers
+- It tracks variables used in if conditions, but only when the variable names are identical across functions
+- It doesn't track variable relationships across function calls when different parameter names are used
+- It doesn't track dependencies through function pointers or other complex references
 - It may not handle all Python language features, especially more advanced metaprogramming techniques
 
 ## Contributing

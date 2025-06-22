@@ -18,9 +18,19 @@ pub struct FunctionInfo {
     pub end_line: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct IfConditionInfo {
+    pub condition: String,
+    pub function_key: String,
+    pub file_path: PathBuf,
+    pub line: usize,
+    pub variables: Vec<String>,
+}
+
 pub struct CodeAnalyzer {
     parser: TsParser,
     pub functions: HashMap<String, FunctionInfo>,
+    pub if_conditions: HashMap<String, Vec<IfConditionInfo>>,
     pub dependency_graph: DiGraph<String, ()>,
     pub node_indices: HashMap<String, NodeIndex>,
 }
@@ -29,6 +39,7 @@ impl std::fmt::Debug for CodeAnalyzer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CodeAnalyzer")
             .field("functions", &self.functions)
+            .field("if_conditions", &self.if_conditions)
             .field("dependency_graph", &self.dependency_graph)
             .field("node_indices", &self.node_indices)
             .finish_non_exhaustive()
@@ -44,6 +55,7 @@ impl CodeAnalyzer {
         Ok(CodeAnalyzer {
             parser,
             functions: HashMap::new(),
+            if_conditions: HashMap::new(),
             dependency_graph: DiGraph::new(),
             node_indices: HashMap::new(),
         })
@@ -240,6 +252,13 @@ impl CodeAnalyzer {
     fn traverse_tree_for_calls(&mut self, cursor: &mut TreeCursor, file_path: &Path, source_code: &str, current_function: Option<String>) -> Result<()> {
         let node = cursor.node();
 
+        // Track if statements if we're in a function
+        if node.kind() == "if_statement" && current_function.is_some() {
+            if let Some(ref func_key) = current_function {
+                self.track_if_condition(node, func_key, file_path, source_code);
+            }
+        }
+
         let new_current_function = if node.kind() == "function_definition" {
             // Find the function name
             let mut name_node = None;
@@ -411,6 +430,11 @@ impl CodeAnalyzer {
     fn traverse_tree_for_class_method_calls_block(&mut self, cursor: &mut TreeCursor, file_path: &Path, source_code: &str, class_name: &str, current_function: &str) -> Result<()> {
         let node = cursor.node();
 
+        // Track if statements in class methods
+        if node.kind() == "if_statement" {
+            self.track_if_condition(node, current_function, file_path, source_code);
+        }
+
         if node.kind() == "call" {
             // Process function call within a class method
             let mut function_name = None;
@@ -554,6 +578,74 @@ impl CodeAnalyzer {
         source_code[start_byte..end_byte].to_string()
     }
 
+    fn extract_variables_from_condition(&self, condition_node: Node, source_code: &str) -> Vec<String> {
+        let mut variables = Vec::new();
+        let mut cursor = condition_node.walk();
+
+        self.traverse_condition_for_variables(&mut cursor, source_code, &mut variables);
+
+        variables
+    }
+
+    fn traverse_condition_for_variables(&self, cursor: &mut TreeCursor, source_code: &str, variables: &mut Vec<String>) {
+        let node = cursor.node();
+
+        if node.kind() == "identifier" {
+            // Skip known Python keywords
+            let var_name = self.get_node_text(node, source_code);
+            if !["True", "False", "None", "and", "or", "not", "is", "in"].contains(&var_name.as_str()) {
+                variables.push(var_name);
+            }
+        }
+
+        // Continue traversing
+        if cursor.goto_first_child() {
+            loop {
+                self.traverse_condition_for_variables(cursor, source_code, variables);
+                if !cursor.goto_next_sibling() {
+                    break;
+                }
+            }
+            cursor.goto_parent();
+        }
+    }
+
+    fn track_if_condition(&mut self, if_node: Node, function_key: &str, file_path: &Path, source_code: &str) {
+        // Find the condition part of the if statement
+        let mut condition_node = None;
+
+        for i in 0..if_node.child_count() {
+            if let Some(child) = if_node.child(i) {
+                if child.kind() != "if" && child.kind() != ":" && child.kind() != "block" {
+                    condition_node = Some(child);
+                    break;
+                }
+            }
+        }
+
+        if let Some(condition_node) = condition_node {
+            let condition_text = self.get_node_text(condition_node, source_code);
+            let line = condition_node.start_position().row + 1; // 1-indexed line numbers
+
+            // Extract variables from the condition
+            let variables = self.extract_variables_from_condition(condition_node, source_code);
+
+            let if_condition = IfConditionInfo {
+                condition: condition_text,
+                function_key: function_key.to_string(),
+                file_path: file_path.to_path_buf(),
+                line,
+                variables,
+            };
+
+            // Add the if condition to the map
+            self.if_conditions
+                .entry(function_key.to_string())
+                .or_insert_with(Vec::new)
+                .push(if_condition);
+        }
+    }
+
     pub fn find_function_at_line(&self, file_path: &Path, line: usize) -> Option<String> {
         for (key, info) in &self.functions {
             if info.file_path == file_path && line >= info.start_line && line <= info.end_line {
@@ -583,25 +675,105 @@ impl CodeAnalyzer {
         impacted
     }
 
+    pub fn find_functions_impacted_by_if_condition(&self, function_key: &str, condition_line: usize) -> HashSet<String> {
+        let mut impacted = HashSet::new();
+
+        // First, find the if condition at the specified line
+        if let Some(conditions) = self.if_conditions.get(function_key) {
+            let condition = conditions.iter().find(|c| c.line == condition_line);
+
+            if let Some(condition) = condition {
+                // Find all functions that use variables from this condition
+                for (func_key, func_conditions) in &self.if_conditions {
+                    if func_key == function_key {
+                        continue; // Skip the function itself
+                    }
+
+                    for func_condition in func_conditions {
+                        // Check if any variables from this condition are used in other conditions
+                        for var in &condition.variables {
+                            if func_condition.variables.contains(var) {
+                                impacted.insert(func_key.clone());
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Also include functions directly impacted by the function containing this condition
+                let direct_impacted = self.find_impacted_functions(function_key);
+                impacted.extend(direct_impacted);
+            }
+        }
+
+        impacted
+    }
+
+    pub fn find_functions_impacted_by_if_conditions(&self, function_key: &str) -> HashSet<String> {
+        let mut impacted = HashSet::new();
+
+        // Find all if conditions in this function
+        if let Some(conditions) = self.if_conditions.get(function_key) {
+            for condition in conditions {
+                // For each condition, find impacted functions
+                for (func_key, func_conditions) in &self.if_conditions {
+                    if func_key == function_key {
+                        continue; // Skip the function itself
+                    }
+
+                    for func_condition in func_conditions {
+                        // Check if any variables from this condition are used in other conditions
+                        for var in &condition.variables {
+                            if func_condition.variables.contains(var) {
+                                impacted.insert(func_key.clone());
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Also include functions directly impacted by this function
+        let direct_impacted = self.find_impacted_functions(function_key);
+        impacted.extend(direct_impacted);
+
+        impacted
+    }
+
     pub fn print_impacted_functions(&self, function_key: &str) -> Result<()> {
         if !self.node_indices.contains_key(function_key) {
             return Err(anyhow!("Function not found: {}", function_key));
         }
 
         let impacted = self.find_impacted_functions(function_key);
+        let if_impacted = self.find_functions_impacted_by_if_conditions(function_key);
 
         if let Some(info) = self.functions.get(function_key) {
             println!("\n{}", "Target Function:".green().bold());
             println!("  {} ({}:{})", info.name, info.file_path.display(), info.start_line);
         }
 
-        println!("\n{}", "Impacted Functions:".yellow().bold());
+        println!("\n{}", "Impacted Functions (Direct):".yellow().bold());
         if impacted.is_empty() {
-            println!("  No functions would be impacted by changes to this function.");
+            println!("  No functions would be directly impacted by changes to this function.");
         } else {
-            for function in impacted {
-                if let Some(info) = self.functions.get(&function) {
+            for function in &impacted {
+                if let Some(info) = self.functions.get(function) {
                     println!("  {} ({}:{})", info.name, info.file_path.display(), info.start_line);
+                }
+            }
+        }
+
+        println!("\n{}", "Impacted Functions (Including If Conditions):".yellow().bold());
+        if if_impacted.is_empty() {
+            println!("  No functions would be impacted by changes to if conditions in this function.");
+        } else {
+            for function in if_impacted {
+                if !impacted.contains(&function) { // Only show additional functions
+                    if let Some(info) = self.functions.get(&function) {
+                        println!("  {} ({}:{})", info.name, info.file_path.display(), info.start_line);
+                    }
                 }
             }
         }
