@@ -2,6 +2,8 @@
 
 A tool that analyzes Python code to identify functions that would be impacted by changes to a specific function or code location.
 
+**NOTE**:: I'm building this as a vibe-coding project. Not real vibe-coding though, as some of the logic is either suggested/implemented by me.
+
 ## Features
 
 - Analyzes Python code to build a dependency graph between functions and methods
